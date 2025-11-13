@@ -4,11 +4,11 @@
 
 # Automatically fetch latest EVDI version from GitHub
 EVDI_GITHUB := https://api.github.com/repos/DisplayLink/evdi
-VERSION := $(shell curl -s $(EVDI_GITHUB)/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+#VERSION := $(shell curl -s $(EVDI_GITHUB)/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
 
 
 DAEMON_VERSION := 6.2.0-30
-#VERSION        := 1.14.11
+VERSION        := 1.14.11
 RELEASE        := 1
 
 #

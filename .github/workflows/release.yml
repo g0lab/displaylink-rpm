@@ -50,11 +50,11 @@ jobs:
 
       - name: Get version
         run: |
-          echo "VERSION=$(make -f Makefile --eval='print_version: ; @echo $(VERSION)' print_version)" >> $GITHUB_ENV
+          echo "VERSION=$(grep ^VERSION Makefile | awk -F:= '{print $2}' | tr -d ' ')" >> $GITHUB_ENV
       
       - name: Get release
         run: |
-          echo "RELEASE=$(make -f Makefile --eval='print_release: ; @echo $(RELEASE)' print_release)" >> $GITHUB_ENV
+          echo "RELEASE=$(grep ^RELEASE Makefile | awk -F:= '{print $2}' | tr -d ' ')" >> $GITHUB_ENV
 
       - name: Specify A Target For make
         run: |
