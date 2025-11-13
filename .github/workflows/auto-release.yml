@@ -6,6 +6,10 @@ on:
     - cron: '0 2 * * 0'
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   check-and-release:
     runs-on: ubuntu-latest
@@ -36,10 +40,10 @@ jobs:
           echo "Comparing: '${{ steps.current.outputs.version }}' vs '${{ steps.latest.outputs.version }}'"
           if [ "${{ steps.current.outputs.version }}" != "${{ steps.latest.outputs.version }}" ]; then
             echo "needs_update=true" >> $GITHUB_OUTPUT
-            echo "✅ New version available: ${{ steps.latest.outputs.version }}"
+            echo "New version available: ${{ steps.latest.outputs.version }}"
           else
             echo "needs_update=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ Already on latest version"
+            echo "Already on latest version"
           fi
           
       - name: Update Makefile
@@ -70,11 +74,30 @@ jobs:
           git tag v${{ steps.latest.outputs.version }}-1
           git push origin v${{ steps.latest.outputs.version }}-1
           
+      - name: Trigger release workflow
+        if: steps.check.outputs.needs_update == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release.yml',
+              ref: 'master',
+              inputs: {
+                version: '${{ steps.latest.outputs.version }}',
+                release: '1',
+                create_release: 'true'
+              }
+            });
+            console.log('Triggered release workflow for version ${{ steps.latest.outputs.version }}-1');
+          
       - name: Summary
         run: |
           if [ "${{ steps.check.outputs.needs_update }}" = "true" ]; then
             echo "Released new version: ${{ steps.latest.outputs.version }}-1"
-            echo "Tag v${{ steps.latest.outputs.version }}-1 has been pushed and will trigger the release workflow"
+            echo "Tag v${{ steps.latest.outputs.version }}-1 has been pushed"
+            echo "Release workflow has been triggered"
           else
             echo "No update needed. Current version ${{ steps.current.outputs.version }} is up to date"
           fi
