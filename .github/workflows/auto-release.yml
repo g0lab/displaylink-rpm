@@ -1,0 +1,73 @@
+name: Auto Release on New Version
+
+on:
+  schedule:
+    # Run every Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Get current version from Makefile
+        id: current
+        run: |
+          CURRENT_VERSION=$(grep ^VERSION Makefile | awk -F:= '{print $2}' | tr -d ' ')
+          CURRENT_RELEASE=$(grep ^RELEASE Makefile | awk -F:= '{print $2}' | tr -d ' ')
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "release=$CURRENT_RELEASE" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION-$CURRENT_RELEASE"
+          
+      - name: Get latest EVDI version from GitHub
+        id: latest
+        run: |
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/DisplayLink/evdi/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
+          echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest EVDI version: $LATEST_VERSION"
+          
+      - name: Check if update needed
+        id: check
+        run: |
+          if [ "${{ steps.current.outputs.version }}" != "${{ steps.latest.outputs.version }}" ]; then
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+            echo "New version available: ${{ steps.latest.outputs.version }}"
+          else
+            echo "needs_update=false" >> $GITHUB_OUTPUT
+            echo "Already on latest version"
+          fi
+          
+      - name: Update Makefile
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          sed -i 's/^VERSION := .*/VERSION := ${{ steps.latest.outputs.version }}/' Makefile
+          sed -i 's/^RELEASE := .*/RELEASE := 1/' Makefile
+          echo "Updated Makefile to version ${{ steps.latest.outputs.version }}-1"
+          
+      - name: Commit and push changes
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Makefile
+          git commit -m "Bump version to ${{ steps.latest.outputs.version }}-1"
+          git push
+          
+      - name: Create and push tag
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          git tag v${{ steps.latest.outputs.version }}-1
+          git push origin v${{ steps.latest.outputs.version }}-1
+          
+      - name: Summary
+        run: |
+          if [ "${{ steps.check.outputs.needs_update }}" = "true" ]; then
+            echo "Released new version: ${{ steps.latest.outputs.version }}-1"
+            echo "Tag v${{ steps.latest.outputs.version }}-1 has been pushed and will trigger the release workflow"
+          else
+            echo "No update needed. Current version ${{ steps.current.outputs.version }} is up to date"
+          fi
