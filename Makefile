@@ -8,7 +8,7 @@ EVDI_GITHUB := https://api.github.com/repos/DisplayLink/evdi
 
 
 DAEMON_VERSION := 6.2.0-30
-VERSION        := 1.14.11
+VERSION        := 1.14.10
 RELEASE        := 1
 
 #
