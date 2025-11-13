@@ -6,6 +6,12 @@ on:
   #   - cron: '45 5 * * 1'
 
 jobs:
+  disabled:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Workflow Disabled
+        run: echo "Rawhide builds are currently disabled. Only Fedora 43 x86_64 builds are active."
+  
   # rawhideBuilds:
   #   strategy:
   #     matrix:
