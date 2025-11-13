@@ -17,8 +17,8 @@ jobs:
       - name: Get current version from Makefile
         id: current
         run: |
-          CURRENT_VERSION=$(grep ^VERSION Makefile | awk -F:= '{print $2}' | tr -d ' ')
-          CURRENT_RELEASE=$(grep ^RELEASE Makefile | awk -F:= '{print $2}' | tr -d ' ')
+          CURRENT_VERSION=$(grep '^VERSION ' Makefile | grep -v '^#' | awk '{print $3}' | head -1)
+          CURRENT_RELEASE=$(grep '^RELEASE ' Makefile | grep -v '^#' | awk '{print $3}' | head -1)
           echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "release=$CURRENT_RELEASE" >> $GITHUB_OUTPUT
           echo "Current version: $CURRENT_VERSION-$CURRENT_RELEASE"
@@ -33,20 +33,22 @@ jobs:
       - name: Check if update needed
         id: check
         run: |
+          echo "Comparing: '${{ steps.current.outputs.version }}' vs '${{ steps.latest.outputs.version }}'"
           if [ "${{ steps.current.outputs.version }}" != "${{ steps.latest.outputs.version }}" ]; then
             echo "needs_update=true" >> $GITHUB_OUTPUT
-            echo "New version available: ${{ steps.latest.outputs.version }}"
+            echo "✅ New version available: ${{ steps.latest.outputs.version }}"
           else
             echo "needs_update=false" >> $GITHUB_OUTPUT
-            echo "Already on latest version"
+            echo "ℹ️ Already on latest version"
           fi
           
       - name: Update Makefile
         if: steps.check.outputs.needs_update == 'true'
         run: |
-          sed -i 's/^VERSION := .*/VERSION := ${{ steps.latest.outputs.version }}/' Makefile
-          sed -i 's/^RELEASE := .*/RELEASE := 1/' Makefile
+          sed -i 's/^VERSION\s*:=.*/VERSION        := ${{ steps.latest.outputs.version }}/' Makefile
+          sed -i 's/^RELEASE\s*:=.*/RELEASE        := 1/' Makefile
           echo "Updated Makefile to version ${{ steps.latest.outputs.version }}-1"
+          cat Makefile | grep -E "^(VERSION|RELEASE)"
           
       - name: Commit and push changes
         if: steps.check.outputs.needs_update == 'true'
@@ -54,8 +56,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Makefile
-          git commit -m "Bump version to ${{ steps.latest.outputs.version }}-1"
-          git push
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Bump version to ${{ steps.latest.outputs.version }}-1"
+            git push
+          fi
           
       - name: Create and push tag
         if: steps.check.outputs.needs_update == 'true'
