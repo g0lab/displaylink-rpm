@@ -20,6 +20,9 @@ on:
   release:
     types:
       - published
+  push:
+    tags:
+      - 'v*'
 
 jobs:  
   buildrpms-x86-64:
@@ -67,6 +70,9 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # Extract version from tag (e.g., v1.14.11-1 -> 1.14.11)
+            echo "VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//' | sed 's/-[^-]*$//')" >> $GITHUB_ENV
           else
             echo "VERSION=$(grep ^VERSION Makefile | awk -F:= '{print $2}' | tr -d ' ')" >> $GITHUB_ENV
           fi
@@ -75,6 +81,9 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "RELEASE=${{ inputs.release }}" >> $GITHUB_ENV
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # Extract release from tag (e.g., v1.14.11-1 -> 1)
+            echo "RELEASE=$(echo ${{ github.ref_name }} | sed 's/^v//' | sed 's/^.*-//')" >> $GITHUB_ENV
           else
             echo "RELEASE=$(grep ^RELEASE Makefile | awk -F:= '{print $2}' | tr -d ' ')" >> $GITHUB_ENV
           fi
@@ -100,16 +109,6 @@ jobs:
       - run: mv x86_64/displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.x86_64.rpm ${{ matrix.os }}-${{ matrix.version }}-displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.x86_64.rpm
       - run: chown `id -u`:`id -g` -R .
 
-      - name: Create Release
-        if: github.event_name == 'workflow_dispatch' && inputs.create_release == true
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ env.VERSION }}-${{ env.RELEASE }}
-          name: Release ${{ env.VERSION }}-${{ env.RELEASE }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-
       - name: Upload RPM
         uses: actions/upload-artifact@v4
         with:
@@ -126,6 +125,7 @@ jobs:
           update_latest_release: true
           tags: true
           overwrite: true
+          tag_name: v${{ env.VERSION }}-${{ env.RELEASE }}
 
   # buildrpms-arm:
   #   needs: buildrpms-x86-64
