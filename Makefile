@@ -6,10 +6,10 @@
 EVDI_GITHUB := https://api.github.com/repos/DisplayLink/evdi
 VERSION := $(shell curl -s $(EVDI_GITHUB)/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
 
-# Latest DisplayLink daemon version (manual)
-DAEMON_VERSION := 6.2.0-30 
 
-RELEASE := 1
+DAEMON_VERSION := 6.2.0-30
+#VERSION        := 1.14.11
+RELEASE        := 1
 
 #
 # Dependencies
@@ -49,6 +49,8 @@ TARGETS_GITHUB_EVDI := $(RPM_GITHUB_EVDI) $(SRPM_GITHUB_EVDI)
 #
 # Upstream checks
 #
+
+EVDI_GITHUB := https://api.github.com/repos/DisplayLink/evdi
 
 define get_latest_prerelease
 	curl -s $(EVDI_GITHUB)/releases?per_page=1 \
