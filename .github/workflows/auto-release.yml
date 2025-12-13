@@ -5,9 +5,13 @@ on:
     - cron: '0 2 * * 0'
   workflow_dispatch:
 
+# =============================================================================
+# CONFIGURATION
+# Set VERSION_OVERRIDE to force a specific version (leave empty to auto-detect)
+# Update FEDORA_VERSION in both the container image AND the job env section below
+# =============================================================================
+
 env:
-  FEDORA_VERSION: "43"
-  # Set VERSION_OVERRIDE to force a specific version (leave empty to auto-detect from EVDI releases)
   VERSION_OVERRIDE: ""
 
 permissions:
@@ -69,10 +73,12 @@ jobs:
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     container: 
-      image: quay.io/fedora/fedora:${{ env.FEDORA_VERSION }}
+      # NOTE: Update this image tag when changing FEDORA_VERSION above
+      image: quay.io/fedora/fedora:43
     env:
       VERSION: ${{ needs.check-version.outputs.version }}
       RELEASE: ${{ needs.check-version.outputs.release }}
+      FEDORA_VERSION: "43"
     steps:
       - uses: actions/checkout@v4
 
