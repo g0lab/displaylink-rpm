@@ -1,0 +1,122 @@
+name: Auto Release on New Version
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+
+env:
+  FEDORA_VERSION: "43"
+  # Set VERSION_OVERRIDE to force a specific version (leave empty to auto-detect from EVDI releases)
+  VERSION_OVERRIDE: ""
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.release_info.outputs.should_build }}
+      version: ${{ steps.release_info.outputs.version }}
+      release: ${{ steps.release_info.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Get latest EVDI version from GitHub
+        id: evdi_latest
+        run: |
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/DisplayLink/evdi/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
+          echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest EVDI version: $LATEST_VERSION"
+
+      - name: Determine version and release number
+        id: release_info
+        run: |
+          # Determine which version to use
+          if [ -n "${{ env.VERSION_OVERRIDE }}" ]; then
+            VERSION="${{ env.VERSION_OVERRIDE }}"
+            echo "Using manual override version: $VERSION"
+          else
+            VERSION="${{ steps.evdi_latest.outputs.version }}"
+            echo "Using latest EVDI version: $VERSION"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Get all releases for this version and find the highest release number
+          RELEASES=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases" | grep -oP '"tag_name": "v'$VERSION'-\K[0-9]+' | sort -n | tail -1)
+          
+          if [ -z "$RELEASES" ]; then
+            # No existing releases for this version, start at 1
+            RELEASE=1
+            echo "No existing releases for v$VERSION, starting at release 1"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            # Increment the release number
+            RELEASE=$((RELEASES + 1))
+            echo "Found existing release v$VERSION-$RELEASES, next will be v$VERSION-$RELEASE"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "release=$RELEASE" >> $GITHUB_OUTPUT
+          echo "Will build: v$VERSION-$RELEASE"
+
+  build-fedora-x86_64:
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    container: 
+      image: quay.io/fedora/fedora:${{ env.FEDORA_VERSION }}
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+      RELEASE: ${{ needs.check-version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make sure awk is present
+        run: dnf5 install gawk -y
+
+      - name: Set build environment variables
+        run: |
+          echo "SPECIFICTARGET=github-release" >> $GITHUB_ENV
+          echo "EVDISOURCE=.github_evdi" >> $GITHUB_ENV
+          echo "OSVERSION=${{ env.FEDORA_VERSION }}" >> $GITHUB_ENV
+     
+      - name: Run CI
+        run: ci/fedora.sh
+
+      - name: Rename files
+        run: |
+          ls -la
+          mv displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.src.rpm fedora-${{ env.FEDORA_VERSION }}-displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.src.rpm
+          mv x86_64/displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.x86_64.rpm fedora-${{ env.FEDORA_VERSION }}-displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.x86_64.rpm
+          chown `id -u`:`id -g` -R .
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-${{ env.FEDORA_VERSION }}-displaylink-${{ env.VERSION }}-${{ env.RELEASE }}-x86_64
+          path: fedora-${{ env.FEDORA_VERSION }}-displaylink-${{ env.VERSION }}-${{ env.RELEASE }}.*.rpm
+
+      - name: Upload Assets To Release
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: 'fedora-${{ env.FEDORA_VERSION }}-displaylink-${{ env.VERSION }}-${{ env.RELEASE }}.*.rpm'
+          draft: false
+          overwrite: true
+          tag_name: v${{ env.VERSION }}-${{ env.RELEASE }}
+          
+  summary:
+    needs: [check-version, build-fedora-x86_64]
+    if: always() && needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "Released version: ${{ needs.check-version.outputs.version }}-${{ needs.check-version.outputs.release }}"
+          echo "Build completed and assets uploaded to release"
