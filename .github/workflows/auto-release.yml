@@ -40,6 +40,7 @@ jobs:
       - name: Determine version and release number
         id: release_info
         run: |
+          set -e
           # Determine which version to use
           if [ -n "${{ env.VERSION_OVERRIDE }}" ]; then
             VERSION="${{ env.VERSION_OVERRIDE }}"
@@ -49,20 +50,46 @@ jobs:
             echo "Using latest EVDI version: $VERSION"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Determine latest released *base* version from this repo (v<version>-<release>)
+          # If there are no releases yet, treat as empty.
+          LATEST_TAG=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+' || true)
+          LATEST_BASE=$(echo "$LATEST_TAG" | sed -n 's/^v\(.*\)-[0-9][0-9]*$/\1/p')
+          echo "Latest repo release tag: ${LATEST_TAG:-<none>}"
+          echo "Latest repo base version: ${LATEST_BASE:-<none>}"
+
+          # Decide whether to build:
+          # - Manual workflow_dispatch: always build (so you can increment -N)
+          # - Scheduled: only build if upstream version changed (unless VERSION_OVERRIDE is set)
+          SHOULD_BUILD=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHOULD_BUILD=true
+          elif [ -n "${{ env.VERSION_OVERRIDE }}" ]; then
+            # If someone set VERSION_OVERRIDE, assume they want a build.
+            SHOULD_BUILD=true
+          elif [ -z "$LATEST_BASE" ] || [ "$LATEST_BASE" != "$VERSION" ]; then
+            SHOULD_BUILD=true
+          fi
+
+          if [ "$SHOULD_BUILD" != "true" ]; then
+            echo "No new upstream version; skipping scheduled release."
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "release=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "should_build=true" >> $GITHUB_OUTPUT
           
           # Get all releases for this version and find the highest release number
-          RELEASES=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases" | grep -oP '"tag_name": "v'$VERSION'-\K[0-9]+' | sort -n | tail -1)
+          RELEASES=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" | grep -oP '"tag_name": "v'$VERSION'-\K[0-9]+' | sort -n | tail -1)
           
           if [ -z "$RELEASES" ]; then
             # No existing releases for this version, start at 1
             RELEASE=1
             echo "No existing releases for v$VERSION, starting at release 1"
-            echo "should_build=true" >> $GITHUB_OUTPUT
           else
             # Increment the release number
             RELEASE=$((RELEASES + 1))
             echo "Found existing release v$VERSION-$RELEASES, next will be v$VERSION-$RELEASE"
-            echo "should_build=true" >> $GITHUB_OUTPUT
           fi
           
           echo "release=$RELEASE" >> $GITHUB_OUTPUT
@@ -73,7 +100,7 @@ jobs:
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     container: 
-      # NOTE: Update this image tag when changing FEDORA_VERSION above
+      # NOTE: Update this image tag when changing FEDORA_VERSION below
       image: quay.io/fedora/fedora:43
     env:
       VERSION: ${{ needs.check-version.outputs.version }}
@@ -87,7 +114,9 @@ jobs:
 
       - name: Set build environment variables
         run: |
-          echo "SPECIFICTARGET=github-release" >> $GITHUB_ENV
+          # Pass VERSION/RELEASE to make on the command line so they override Makefile defaults
+          # (Makefile uses := which would otherwise win over environment variables)
+          echo "SPECIFICTARGET=github-release VERSION=$VERSION RELEASE=$RELEASE" >> $GITHUB_ENV
           echo "EVDISOURCE=.github_evdi" >> $GITHUB_ENV
           echo "OSVERSION=${{ env.FEDORA_VERSION }}" >> $GITHUB_ENV
      
@@ -97,8 +126,24 @@ jobs:
       - name: Rename files
         run: |
           ls -la
-          mv displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.src.rpm fedora-${{ env.FEDORA_VERSION }}-displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.src.rpm
-          mv x86_64/displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.x86_64.rpm fedora-${{ env.FEDORA_VERSION }}-displaylink-${{ env.VERSION }}-${{ env.RELEASE }}${{ env.EVDISOURCE }}.x86_64.rpm
+          SRC_IN="displaylink-${VERSION}-${RELEASE}${EVDISOURCE}.src.rpm"
+          if [ ! -f "$SRC_IN" ]; then
+            echo "Expected SRPM '$SRC_IN' not found. Candidates:"
+            ls -1 displaylink-"${VERSION}"-*.src.rpm || true
+            SRC_IN=$(ls -1 displaylink-"${VERSION}"-*.src.rpm 2>/dev/null | head -1)
+          fi
+          test -n "$SRC_IN" && test -f "$SRC_IN"
+          mv "$SRC_IN" "fedora-${FEDORA_VERSION}-displaylink-${VERSION}-${RELEASE}${EVDISOURCE}.src.rpm"
+
+          BIN_IN="x86_64/displaylink-${VERSION}-${RELEASE}${EVDISOURCE}.x86_64.rpm"
+          if [ ! -f "$BIN_IN" ]; then
+            echo "Expected RPM '$BIN_IN' not found. Candidates:"
+            ls -1 x86_64/displaylink-"${VERSION}"-*.x86_64.rpm || true
+            BIN_IN=$(ls -1 x86_64/displaylink-"${VERSION}"-*.x86_64.rpm 2>/dev/null | head -1)
+          fi
+          test -n "$BIN_IN" && test -f "$BIN_IN"
+          mv "$BIN_IN" "fedora-${FEDORA_VERSION}-displaylink-${VERSION}-${RELEASE}${EVDISOURCE}.x86_64.rpm"
+
           chown `id -u`:`id -g` -R .
 
       - name: Upload RPM
@@ -116,13 +161,3 @@ jobs:
           draft: false
           overwrite: true
           tag_name: v${{ env.VERSION }}-${{ env.RELEASE }}
-          
-  summary:
-    needs: [check-version, build-fedora-x86_64]
-    if: always() && needs.check-version.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Summary
-        run: |
-          echo "Released version: ${{ needs.check-version.outputs.version }}-${{ needs.check-version.outputs.release }}"
-          echo "Build completed and assets uploaded to release"
